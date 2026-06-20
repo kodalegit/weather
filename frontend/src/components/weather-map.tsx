@@ -2,15 +2,21 @@
 
 import { useEffect } from "react";
 import L from "leaflet";
-import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from "react-leaflet";
+import {
+  MapContainer,
+  Marker,
+  TileLayer,
+  useMap,
+  useMapEvents,
+} from "react-leaflet";
 
 type Pin = { lat: number; lon: number };
 
 const markerIcon = L.divIcon({
   className: "",
   html: '<div class="field-marker"><div></div></div>',
-  iconSize: [30, 30],
-  iconAnchor: [15, 30],
+  iconSize: [26, 26],
+  iconAnchor: [4, 24],
 });
 
 function MapEvents({ onPick }: { onPick: (pin: Pin) => void }) {
@@ -25,7 +31,9 @@ function MapEvents({ onPick }: { onPick: (pin: Pin) => void }) {
 function Recenter({ pin }: { pin: Pin }) {
   const map = useMap();
   useEffect(() => {
-    map.flyTo([pin.lat, pin.lon], Math.max(map.getZoom(), 10), { duration: 0.8 });
+    map.flyTo([pin.lat, pin.lon], Math.max(map.getZoom(), 10), {
+      duration: 0.8,
+    });
   }, [map, pin.lat, pin.lon]);
   return null;
 }
@@ -43,7 +51,7 @@ export default function WeatherMap({
       zoom={10}
       minZoom={3}
       scrollWheelZoom
-      className="h-full min-h-[62vh] w-full xl:min-h-screen"
+      className="h-full min-h-[58vh] w-full lg:min-h-screen"
       zoomControl={false}
     >
       <TileLayer

@@ -2,23 +2,26 @@
 
 FieldCast is an AI Engineer challenge project for WeatherAI: an interactive field intelligence map that turns raw weather API responses into operational decisions.
 
-Users can click anywhere on the map, fetch a WeatherAI forecast through a FastAPI backend, inspect the raw response, copy a 160-character SMS-ready alert, and ask a lightweight tool-calling agent for natural-language advice.
+Users can click anywhere on the map, fetch a WeatherAI forecast through a FastAPI backend, inspect the raw response, copy a concise advisory, and ask a streaming tool-calling agent for natural-language advice.
 
 ## Features
 
-- Interactive Leaflet map with pin-based WeatherAI lookups
-- FastAPI backend keeps the WeatherAI API key private
-- Deterministic local advisory engine for rain, wind, and temperature risk
-- SMS alert preview for last-mile delivery workflows
-- Agent-style endpoint that exposes its tool calls and synthesized answer
-- Raw WeatherAI JSON inspector for transparent API integration review
-- Usage/quota fetch via the WeatherAI usage endpoint
+- **Two-panel experience**: full interactive Leaflet map on the left, weather intelligence on the right
+- **Weather intelligence hierarchy**: location summary, current conditions, hourly/daily forecast timeline, and a field advisory
+- **Streaming weather agent**: a chat-style interface that calls WeatherAI live and streams tokens, tool calls, and reasoning
+- **Copy-ready advisory**: a single-field advisory with one-tap copy, replacing the redundant SMS preview
+- **FastAPI backend** keeps the WeatherAI API key private and powers the streaming agent
+- **Raw WeatherAI JSON inspector** in a collapsed panel for transparent API review
 
 ## Stack
 
-- Frontend: Next.js, React, Tailwind CSS, shadcn-style primitives, Leaflet
-- Backend: FastAPI, uv, httpx, pydantic-settings
+- Frontend: Next.js 16, React 19, Tailwind CSS v4, Leaflet, TanStack Query
+- Backend: FastAPI, uv, httpx, pydantic-settings, LangChain
 - API: WeatherAI `/v1/weather` and `/v1/usage`
+
+## Design
+
+The interface follows a calm, information-dense aesthetic inspired by Linear, Vercel, Apple Weather, Notion, and Arc Browser: soft borders, restrained color, generous spacing, and clear hierarchy. Weather data is parsed from the WeatherAI response shape into human-readable sections (current conditions, hourly/daily forecast, advisory) rather than presented as raw cards.
 
 ## Local Setup
 
@@ -33,6 +36,7 @@ Add your WeatherAI key to `backend/.env`:
 
 ```bash
 WEATHERAI_API_KEY=your_weatherai_api_key
+OPENAI_API_KEY=your_openai_api_key
 ```
 
 Install and run:
@@ -79,6 +83,8 @@ Set backend environment variables:
 - `WEATHERAI_API_KEY`
 - `WEATHERAI_BASE_URL=https://api.weather-ai.co`
 - `FRONTEND_ORIGIN=https://your-frontend-domain`
+- `OPENAI_API_KEY`
+- `OPENAI_CHAT_MODEL`
 
 Deploy the frontend on Railway, Netlify, or Vercel and set:
 
@@ -86,4 +92,4 @@ Deploy the frontend on Railway, Netlify, or Vercel and set:
 
 ## Project Framing
 
-The Free WeatherAI plan is enough for the core demo. Real SMS sending is not included in the MVP because WeatherAI's live SMS/USSD delivery is a Scale-plan capability, so FieldCast presents a production-shaped SMS preview that can be wired to live delivery once approved.
+The Free WeatherAI plan is enough for the core demo. Real SMS sending is not included in the MVP because WeatherAI's live SMS/USSD delivery is a Scale-plan capability, so FieldCast presents a production-shaped advisory that can be copied and wired to live delivery once approved.

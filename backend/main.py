@@ -461,11 +461,23 @@ async def stream_weather_agent(request: ChatRequest) -> AsyncGenerator[dict[str,
                     if node_name == "model":
                         tool_calls = getattr(latest, "tool_calls", None) or []
                         for tool_call in tool_calls:
+                            args = tool_call.get("args", {}) or {}
+                            # The get_weather tool reads everything from runtime
+                            # context, so the LLM sends no args. Surface the
+                            # context the tool will actually use so the UI can
+                            # show meaningful "tool input".
+                            if not args:
+                                args = {
+                                    "lat": context.lat,
+                                    "lon": context.lon,
+                                    "days": context.days,
+                                    "units": context.units,
+                                }
                             yield {
                                 "type": "tool_start",
                                 "tool": tool_call.get("name", "get_weather"),
                                 "tool_call_id": tool_call.get("id", ""),
-                                "input": tool_call.get("args", {}),
+                                "input": args,
                             }
 
                     elif node_name == "tools":

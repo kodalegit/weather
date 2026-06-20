@@ -1,15 +1,21 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ece7dc;
+  --background: #f5f3ee;
   --foreground: #1c1917;
+  --surface: #ffffff;
+  --surface-muted: #faf9f6;
+  --border: #e7e2d8;
+  --border-strong: #d6d0c2;
+  --accent: #4a6cf7;
+  --accent-soft: #eef2ff;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: "Aptos", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "Cascadia Mono", "SFMono-Regular", ui-monospace, monospace;
+  --font-sans: var(--font-inter), "Aptos", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), "Cascadia Mono", "SFMono-Regular", ui-monospace, monospace;
 }
 
 * {
@@ -25,49 +31,139 @@ body {
   margin: 0;
   background: var(--background);
   color: var(--foreground);
-  font-family: "Aptos", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
 }
 
+/* Leaflet refinements */
 .leaflet-container {
-  background: #d8d0be;
-  font-family: "Aptos", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  background: #e3ddcf;
+  font-family: var(--font-sans);
 }
 
 .leaflet-tile {
-  filter: saturate(0.78) contrast(1.06) sepia(0.08);
+  filter: saturate(0.82) contrast(1.04) brightness(1.02);
 }
 
 .leaflet-control-attribution {
-  border-radius: 6px 0 0 0;
-  background: rgb(255 250 240 / 0.84) !important;
-  color: #57534e !important;
+  border-radius: 8px 0 0 0;
+  background: rgb(255 255 255 / 0.72) !important;
+  color: #78716c !important;
   font-size: 10px !important;
+  padding: 2px 6px !important;
+  backdrop-filter: blur(8px);
 }
 
 .field-marker {
   position: relative;
-  height: 30px;
-  width: 30px;
-  transform: rotate(45deg);
-  border-radius: 16px 16px 16px 2px;
-  border: 3px solid #fffaf0;
+  height: 26px;
+  width: 26px;
+  border-radius: 50% 50% 50% 0;
+  border: 3px solid #fff;
   background: #dc2626;
-  box-shadow: 0 14px 30px rgb(28 25 23 / 0.38);
+  transform: rotate(-45deg);
+  box-shadow: 0 8px 20px rgb(28 25 23 / 0.35), 0 0 0 1px rgb(28 25 23 / 0.08);
+  transition: transform 0.2s ease;
 }
 
 .field-marker div {
   position: absolute;
-  inset: 7px;
+  inset: 6px;
   border-radius: 999px;
-  background: #fffaf0;
+  background: #fff;
+  transform: rotate(45deg);
+}
+
+/* Custom scrollbars */
+.scroll-area {
+  scrollbar-width: thin;
+  scrollbar-color: #d6d0c2 transparent;
+}
+
+.scroll-area::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scroll-area::-webkit-scrollbar-thumb {
+  background-color: #d6d0c2;
+  border-radius: 999px;
+}
+
+.scroll-area::-webkit-scrollbar-thumb:hover {
+  background-color: #b8b0a0;
 }
 
 ::selection {
-  background: #fbbf24;
+  background: #c7d0ff;
   color: #1c1917;
+}
+
+/* Subtle entrance animations */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.35s ease-out both;
+}
+
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.animate-pulse-soft {
+  animation: pulse-soft 1.8s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.shimmer {
+  background: linear-gradient(90deg, #efebe1 25%, #f5f3ee 50%, #efebe1 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+/* Token streaming caret */
+.stream-caret::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 14px;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: currentColor;
+  opacity: 0.7;
+  animation: pulse-soft 1s ease-in-out infinite;
 }
