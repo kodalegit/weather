@@ -2,8 +2,9 @@
 
 import "leaflet/dist/leaflet.css";
 
+import { useMutation, useQuery } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import {
   Activity,
   Bot,
@@ -12,11 +13,11 @@ import {
   Crosshair,
   Database,
   Droplets,
-  Loader2,
   MessageSquare,
   Radio,
   Send,
   Thermometer,
+  Wrench,
   Wind,
 } from "lucide-react";
 
@@ -43,10 +44,13 @@ type WeatherResponse = {
   meta: Record<string, string | null>;
   advisory: Advisory;
 };
-type ChatResponse = {
-  answer: string;
-  tool_calls: Array<{ name: string; args: Record<string, unknown> }>;
-};
+type ChatEvent =
+  | { type: "context"; lat: number; lon: number; days: number; units: string }
+  | { type: "tool_start"; tool: string; tool_call_id: string; input: Record<string, unknown> }
+  | { type: "tool_end"; tool: string; tool_call_id: string; summary: string }
+  | { type: "token"; delta: string }
+  | { type: "done"; content: string }
+  | { type: "error"; message: string };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 const starterPin = { lat: -1.1468, lon: 36.961 };
@@ -93,75 +97,98 @@ function formatMaybe(value: number | string | null | undefined, suffix = "") {
   return value;
 }
 
+async function fetchWeather(pin: Pin, ai: boolean): Promise<WeatherResponse> {
+  const res = await fetch(
+    `${API_BASE}/api/weather?lat=${pin.lat}&lon=${pin.lon}&days=3&ai=${ai}`,
+  );
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail ? JSON.stringify(data.detail) : "Weather fetch failed");
+  return data;
+}
+
+async function fetchUsage(): Promise<Record<string, unknown> | null> {
+  const res = await fetch(`${API_BASE}/api/usage`);
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.data ?? data;
+}
+
 export function FieldCastApp() {
   const [pin, setPin] = useState<Pin>(starterPin);
   const [includeAi, setIncludeAi] = useState(true);
-  const [weather, setWeather] = useState<WeatherResponse | null>(null);
-  const [usage, setUsage] = useState<Record<string, unknown> | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [question, setQuestion] = useState("Should I spray crops here tomorrow afternoon?");
-  const [chat, setChat] = useState<ChatResponse | null>(null);
-  const [chatLoading, setChatLoading] = useState(false);
+  const [events, setEvents] = useState<ChatEvent[]>([]);
+  const [streamedAnswer, setStreamedAnswer] = useState("");
 
-  async function fetchWeather(nextPin = pin, ai = includeAi) {
-    setPin(nextPin);
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(
-        `${API_BASE}/api/weather?lat=${nextPin.lat}&lon=${nextPin.lon}&days=3&ai=${ai}`,
-      );
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail ? JSON.stringify(data.detail) : "Weather fetch failed");
-      setWeather(data);
-      setChat(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unexpected weather error");
-    } finally {
-      setLoading(false);
-    }
-  }
+  const weatherQuery = useQuery({
+    queryKey: ["weather", pin.lat, pin.lon, includeAi],
+    queryFn: () => fetchWeather(pin, includeAi),
+  });
+  const usageQuery = useQuery({
+    queryKey: ["usage"],
+    queryFn: fetchUsage,
+  });
 
-  async function fetchUsage() {
-    try {
-      const res = await fetch(`${API_BASE}/api/usage`);
-      if (res.ok) {
-        const data = await res.json();
-        setUsage(data.data ?? data);
-      }
-    } catch {
-      setUsage(null);
-    }
-  }
-
-  async function askAgent(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setChatLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`${API_BASE}/api/chat`, {
+  const streamMutation = useMutation({
+    mutationFn: async () => {
+      setEvents([]);
+      setStreamedAnswer("");
+      const res = await fetch(`${API_BASE}/api/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: question, lat: pin.lat, lon: pin.lon }),
+        body: JSON.stringify({ message: question, lat: pin.lat, lon: pin.lon, days: 3 }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail ?? "Agent request failed");
-      setChat(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unexpected agent error");
-    } finally {
-      setChatLoading(false);
-    }
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.detail ?? "Agent stream failed");
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() ?? "";
+
+        for (const chunk of chunks) {
+          const line = chunk
+            .split("\n")
+            .find((item) => item.startsWith("data: "));
+          if (!line) continue;
+          const event = JSON.parse(line.slice(6)) as ChatEvent;
+          setEvents((current) => [...current, event]);
+          if (event.type === "token") {
+            setStreamedAnswer((current) => current + event.delta);
+          }
+          if (event.type === "done") {
+            setStreamedAnswer(event.content);
+          }
+          if (event.type === "error") {
+            throw new Error(event.message);
+          }
+        }
+      }
+    },
+  });
+
+  function askAgent(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    streamMutation.mutate();
   }
 
-  useEffect(() => {
-    // Initial app hydration intentionally loads the default field once.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchWeather(starterPin, true);
-    fetchUsage();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const weather = weatherQuery.data ?? null;
+  const usage = usageQuery.data;
+  const loading = weatherQuery.isLoading || weatherQuery.isFetching;
+  const error =
+    weatherQuery.error instanceof Error
+      ? weatherQuery.error.message
+      : streamMutation.error instanceof Error
+        ? streamMutation.error.message
+        : null;
 
   const signals = weather?.advisory.signals;
   const temp =
@@ -205,7 +232,7 @@ export function FieldCastApp() {
                 <Button
                   size="sm"
                   variant="secondary"
-                  onClick={() => fetchWeather(starterPin, includeAi)}
+                  onClick={() => setPin(starterPin)}
                   title="Jump to Ruiru"
                 >
                   <Crosshair className="h-4 w-4" />
@@ -216,7 +243,6 @@ export function FieldCastApp() {
                   variant={includeAi ? "default" : "secondary"}
                   onClick={() => {
                     setIncludeAi(!includeAi);
-                    fetchWeather(pin, !includeAi);
                   }}
                 >
                   <Bot className="h-4 w-4" />
@@ -226,7 +252,7 @@ export function FieldCastApp() {
             </div>
           </div>
 
-          <WeatherMap pin={pin} onPick={(nextPin) => fetchWeather(nextPin, includeAi)} />
+          <WeatherMap pin={pin} onPick={setPin} />
 
           <div className="absolute bottom-5 left-5 z-[500] grid max-w-[calc(100%-2.5rem)] grid-cols-2 gap-2 md:grid-cols-4">
             <Metric icon={Thermometer} label="Temp" value={formatMaybe(temp, "C")} />
@@ -308,31 +334,25 @@ export function FieldCastApp() {
 
           <Card className="border-stone-300">
             <CardHeader>
-              <CardTitle>Tool-Calling Agent</CardTitle>
+              <CardTitle>Live Weather Agent</CardTitle>
             </CardHeader>
             <CardContent>
               <form className="space-y-3" onSubmit={askAgent}>
                 <Input value={question} onChange={(event) => setQuestion(event.target.value)} />
-                <Button disabled={chatLoading} className="w-full">
-                  {chatLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  Ask field agent
+                <Button disabled={streamMutation.isPending || !question.trim()} className="w-full">
+                  {streamMutation.isPending ? (
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                  Stream agent run
                 </Button>
               </form>
-              {chat ? (
-                <div className="mt-4 space-y-3">
-                  <div className="rounded-lg bg-stone-950 p-3 text-sm leading-relaxed text-white">
-                    <MessageSquare className="mb-2 h-4 w-4 text-amber-300" />
-                    {chat.answer}
-                  </div>
-                  <div className="space-y-2">
-                    {chat.tool_calls.map((call) => (
-                      <div key={call.name} className="rounded-md bg-stone-100 p-2 font-mono text-xs">
-                        {call.name}({JSON.stringify(call.args)})
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
+              <AgentStreamPanel
+                events={events}
+                answer={streamedAnswer}
+                running={streamMutation.isPending}
+              />
             </CardContent>
           </Card>
 
@@ -353,6 +373,140 @@ export function FieldCastApp() {
       </div>
     </main>
   );
+}
+
+function AgentStreamPanel({
+  events,
+  answer,
+  running,
+}: {
+  events: ChatEvent[];
+  answer: string;
+  running: boolean;
+}) {
+  const toolEvents = useMemo(() => buildToolEvents(events), [events]);
+  const contextEvent = events.find((event) => event.type === "context");
+  const errorEvent = events.find((event) => event.type === "error");
+
+  if (!events.length && !answer && !running) {
+    return (
+      <div className="mt-4 rounded-lg border border-dashed border-stone-300 bg-stone-50 p-4 text-sm leading-relaxed text-stone-500">
+        Ask a question and the agent will stream its WeatherAI tool call before the final answer.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 space-y-3">
+      {contextEvent?.type === "context" ? (
+        <div className="rounded-lg bg-[#fff4cc] p-3 font-mono text-xs text-stone-800">
+          runtime context lat={contextEvent.lat.toFixed(4)} lon={contextEvent.lon.toFixed(4)} days=
+          {contextEvent.days}
+        </div>
+      ) : null}
+
+      {toolEvents.map((toolEvent) => (
+        <details
+          key={toolEvent.id}
+          open={toolEvent.status === "running"}
+          className="overflow-hidden rounded-lg border border-stone-200 bg-stone-50"
+        >
+          <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-sm font-semibold text-stone-800">
+            <span
+              className={cn(
+                "flex h-6 w-6 items-center justify-center rounded-md",
+                toolEvent.status === "running"
+                  ? "bg-amber-100 text-amber-800"
+                  : "bg-emerald-100 text-emerald-800",
+              )}
+            >
+              {toolEvent.status === "running" ? (
+                <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              ) : (
+                <Wrench className="h-3.5 w-3.5" />
+              )}
+            </span>
+            <span className="flex-1">
+              {toolEvent.status === "running" ? "Calling WeatherAI get_weather" : "WeatherAI tool completed"}
+            </span>
+          </summary>
+          <div className="space-y-2 border-t border-stone-200 p-3">
+            {toolEvent.input ? (
+              <pre className="overflow-auto rounded-md bg-white p-2 font-mono text-xs text-stone-600">
+                {JSON.stringify(toolEvent.input, null, 2)}
+              </pre>
+            ) : null}
+            {toolEvent.summary ? (
+              <p className="text-sm leading-relaxed text-stone-600">{toolEvent.summary}</p>
+            ) : null}
+          </div>
+        </details>
+      ))}
+
+      {answer ? (
+        <div className="rounded-lg bg-stone-950 p-4 text-sm leading-relaxed text-white">
+          <MessageSquare className="mb-2 h-4 w-4 text-amber-300" />
+          <p className="whitespace-pre-wrap">{answer}</p>
+        </div>
+      ) : running ? (
+        <div className="rounded-lg bg-stone-950 p-4 text-sm text-stone-300">
+          Waiting for the model to synthesize the WeatherAI result...
+        </div>
+      ) : null}
+
+      {errorEvent?.type === "error" ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          {errorEvent.message}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function buildToolEvents(events: ChatEvent[]) {
+  const items: Array<{
+    id: string;
+    tool: string;
+    input?: Record<string, unknown>;
+    summary?: string;
+    status: "running" | "completed";
+  }> = [];
+  const indexByCallId = new Map<string, number>();
+
+  events.forEach((event, index) => {
+    if (event.type === "tool_start") {
+      const id = event.tool_call_id || `${event.tool}-${index}`;
+      indexByCallId.set(id, items.length);
+      items.push({
+        id,
+        tool: event.tool,
+        input: event.input,
+        status: "running",
+      });
+    }
+
+    if (event.type === "tool_end") {
+      const id = event.tool_call_id || `${event.tool}-${index}`;
+      const existingIndex = indexByCallId.get(id);
+      if (existingIndex === undefined) {
+        items.push({
+          id,
+          tool: event.tool,
+          summary: event.summary,
+          status: "completed",
+        });
+        return;
+      }
+      items[existingIndex] = {
+        ...items[existingIndex],
+        tool: event.tool,
+        summary: event.summary,
+        status: "completed",
+      };
+    }
+  });
+
+  return items;
 }
 
 function Metric({

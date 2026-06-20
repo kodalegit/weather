@@ -11,3 +11,4 @@ UV_CACHE_DIR=.uv-cache uv run fastapi dev main.py
 Required environment variable:
 
 - `WEATHERAI_API_KEY`
+- `OPENAI_API_KEY`
