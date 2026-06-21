@@ -2,6 +2,8 @@
 
 FieldCast is an interactive field intelligence map that turns raw weather API responses into operational decisions.
 
+**🌐 Live demo:** [https://weather-nu-lovat.vercel.app/](https://weather-nu-lovat.vercel.app/)
+
 Users can click anywhere on the map, fetch a WeatherAI forecast through a FastAPI backend, inspect the raw response, copy a concise advisory, and ask a streaming tool-calling agent for natural-language advice.
 
 ---
@@ -68,7 +70,7 @@ LangChain agent layer
 - **Copy-ready advisory**: a single-field advisory with one-tap copy.
 - **FastAPI backend**: keeps the WeatherAI API key private and powers the streaming agent.
 - **Raw WeatherAI JSON inspector**: a collapsed panel for transparent API review.
-- **Rate-limit visibility**: surfaces `x-ratelimit-*` headers from WeatherAI in the UI quota indicator.
+- **Usage visibility**: surfaces API usage and quota limits from the WeatherAI `/v1/usage` response in the UI's floating metrics indicator.
 
 ---
 
