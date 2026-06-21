@@ -9,12 +9,18 @@ from fastapi import HTTPException
 from langchain.agents import create_agent
 from langchain.tools import ToolRuntime, tool
 from langchain_openai import ChatOpenAI
+from openai import APIConnectionError, APITimeoutError, AuthenticationError
 
 from app.config import settings
 from app.locations import infer_location
 from app.schemas import ChatRequest
 from app.weather_parser import compact_weather_payload, extract_text
 from app.weather_service import weatherai_get
+
+
+def _openai_endpoint_label() -> str:
+    """Human-readable label of the OpenAI endpoint in use, for diagnostics."""
+    return settings.openai_base_url or "https://api.openai.com/v1 (default)"
 
 
 @dataclass(slots=True)
@@ -53,12 +59,19 @@ def _build_weather_agent():
         return json.dumps(compact, default=str)
 
     _require_openai_key()
-    model = ChatOpenAI(
-        model=settings.openai_chat_model,
-        api_key=settings.openai_api_key,
-        temperature=0.2,
-        streaming=True,
-    )
+    model_kwargs: dict[str, Any] = {
+        "model": settings.openai_chat_model,
+        "api_key": settings.openai_api_key,
+        "temperature": 0.2,
+        "streaming": True,
+        "timeout": settings.openai_timeout,
+        "max_retries": settings.openai_max_retries,
+    }
+    if settings.openai_base_url:
+        # Only forward when explicitly set; otherwise let the SDK use its
+        # built-in default so we don't accidentally break the common case.
+        model_kwargs["base_url"] = settings.openai_base_url
+    model = ChatOpenAI(**model_kwargs)
     system_prompt = (
         "You are FieldCast, a concise weather operations agent for field teams. "
         "You are given a selected map pin as runtime context. Always call `get_weather` "
@@ -199,8 +212,51 @@ async def stream_weather_agent(
                                 ),
                                 "summary": summary,
                             }
+    except AuthenticationError as exc:
+        yield {
+            "type": "error",
+            "message": (
+                "OpenAI rejected the API key (401). Verify OPENAI_API_KEY on the "
+                f"backend. Endpoint: {_openai_endpoint_label()}. Cause: {exc.body or exc}"
+            )[:480],
+        }
+        return
+    except APITimeoutError as exc:
+        yield {
+            "type": "error",
+            "message": (
+                "OpenAI request timed out. Increase OPENAI_TIMEOUT or retry. "
+                f"Endpoint: {_openai_endpoint_label()}. Cause: {exc}"
+            )[:480],
+        }
+        return
+    except APIConnectionError as exc:
+        # This is the source of the opaque "Connection error" message: the
+        # OpenAI SDK could not establish/read a connection to the API. Surface
+        # the underlying cause (DNS, TLS, proxy, refused, etc.) and the
+        # endpoint so it can be debugged instead of showing a bare string.
+        root = exc.__cause__ or exc
+        yield {
+            "type": "error",
+            "message": (
+                "Could not connect to OpenAI. The backend reached the chat "
+                "endpoint but the OpenAI SDK failed to open a connection. "
+                f"Endpoint: {_openai_endpoint_label()}. "
+                f"Cause: {type(root).__name__}: {root}"
+            )[:480],
+        }
+        return
     except Exception as exc:
-        yield {"type": "error", "message": str(exc)[:240]}
+        # Last-resort fallback: never emit a bare opaque string again.
+        root = exc.__cause__ or exc
+        yield {
+            "type": "error",
+            "message": (
+                f"Agent failed: {type(exc).__name__}: {exc}. "
+                f"Underlying cause: {type(root).__name__}: {root}. "
+                f"OpenAI endpoint: {_openai_endpoint_label()}."
+            )[:480],
+        }
         return
 
     yield {"type": "done", "content": final_content}

@@ -14,6 +14,12 @@ class Settings(BaseSettings):
     )
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     openai_chat_model: str = Field(default="gpt-5-nano", alias="OPENAI_CHAT_MODEL")
+    # Optional override. When empty, the OpenAI SDK uses its default
+    # (https://api.openai.com/v1). Surfaced here so error messages can report
+    # the exact endpoint the backend is trying to reach.
+    openai_base_url: str = Field(default="", alias="OPENAI_BASE_URL")
+    openai_timeout: float = Field(default=30.0, alias="OPENAI_TIMEOUT")
+    openai_max_retries: int = Field(default=2, alias="OPENAI_MAX_RETRIES")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
