@@ -80,6 +80,15 @@ export type ChatEvent =
   | { type: "done"; content: string }
   | { type: "error"; message: string };
 
+export type ChatTurn = {
+  id: string;
+  question: string;
+  events: ChatEvent[];
+  answer: string;
+  status: "running" | "done" | "error";
+  error: string | null;
+};
+
 export type ParsedWeather = {
   location: WeatherLocation | null;
   current: CurrentWeather | null;

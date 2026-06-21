@@ -34,6 +34,7 @@ import {
   parseWeatherData,
   type Advisory,
   type ChatEvent,
+  type ChatTurn,
   type Pin,
   type WeatherResponse,
 } from "@/lib/weather";
@@ -72,8 +73,8 @@ export function FieldCastApp() {
   const [question, setQuestion] = useState(
     "Should I spray crops here tomorrow afternoon?",
   );
-  const [events, setEvents] = useState<ChatEvent[]>([]);
-  const [streamedAnswer, setStreamedAnswer] = useState("");
+  const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
   const [agentOpen, setAgentOpen] = useState(false);
 
   const weatherQuery = useQuery({
@@ -87,8 +88,25 @@ export function FieldCastApp() {
 
   const streamMutation = useMutation({
     mutationFn: async (message: string) => {
-      setEvents([]);
-      setStreamedAnswer("");
+      const turnId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const newTurn: ChatTurn = {
+        id: turnId,
+        question: message,
+        events: [],
+        answer: "",
+        status: "running",
+        error: null,
+      };
+      setTurns((current) => [...current, newTurn]);
+      setActiveTurnId(turnId);
+
+      const patchTurn = (patch: Partial<ChatTurn>) =>
+        setTurns((current) =>
+          current.map((turn) =>
+            turn.id === turnId ? { ...turn, ...patch } : turn,
+          ),
+        );
+
       const res = await fetch(`${API_BASE}/api/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -107,6 +125,7 @@ export function FieldCastApp() {
             ? detail
             : JSON.stringify(detail)
           : "Agent stream failed";
+        patchTurn({ status: "error", error: errorMessage });
         throw new Error(errorMessage);
       }
 
@@ -114,30 +133,83 @@ export function FieldCastApp() {
       const decoder = new TextDecoder();
       let buffer = "";
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const chunks = buffer.split("\n\n");
-        buffer = chunks.pop() ?? "";
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const chunks = buffer.split("\n\n");
+          buffer = chunks.pop() ?? "";
 
-        for (const chunk of chunks) {
-          const line = chunk
-            .split("\n")
-            .find((item) => item.startsWith("data: "));
-          if (!line) continue;
-          const event = JSON.parse(line.slice(6)) as ChatEvent;
-          setEvents((current) => [...current, event]);
-          if (event.type === "token") {
-            setStreamedAnswer((current) => current + event.delta);
-          }
-          if (event.type === "done") {
-            setStreamedAnswer(event.content);
-          }
-          if (event.type === "error") {
-            throw new Error(event.message);
+          for (const chunk of chunks) {
+            const line = chunk
+              .split("\n")
+              .find((item) => item.startsWith("data: "));
+            if (!line) continue;
+            const event = JSON.parse(line.slice(6)) as ChatEvent;
+
+            setTurns((current) =>
+              current.map((turn) =>
+                turn.id === turnId
+                  ? { ...turn, events: [...turn.events, event] }
+                  : turn,
+              ),
+            );
+
+            if (event.type === "token") {
+              setTurns((current) =>
+                current.map((turn) =>
+                  turn.id === turnId
+                    ? { ...turn, answer: turn.answer + event.delta }
+                    : turn,
+                ),
+              );
+            }
+            if (event.type === "done") {
+              setTurns((current) =>
+                current.map((turn) =>
+                  turn.id === turnId
+                    ? {
+                        ...turn,
+                        answer: event.content,
+                        status: "done",
+                      }
+                    : turn,
+                ),
+              );
+            }
+            if (event.type === "error") {
+              setTurns((current) =>
+                current.map((turn) =>
+                  turn.id === turnId
+                    ? {
+                        ...turn,
+                        status: "error",
+                        error: event.message,
+                      }
+                    : turn,
+                ),
+              );
+              throw new Error(event.message);
+            }
           }
         }
+      } catch (error) {
+        setTurns((current) =>
+          current.map((turn) =>
+            turn.id === turnId
+              ? {
+                  ...turn,
+                  status: "error",
+                  error:
+                    error instanceof Error
+                      ? error.message
+                      : "Agent stream failed",
+                }
+              : turn,
+          ),
+        );
+        throw error;
       }
     },
   });
@@ -146,11 +218,7 @@ export function FieldCastApp() {
   const usage = usageQuery.data;
   const loading = weatherQuery.isLoading || weatherQuery.isFetching;
   const error =
-    weatherQuery.error instanceof Error
-      ? weatherQuery.error.message
-      : streamMutation.error instanceof Error
-        ? streamMutation.error.message
-        : null;
+    weatherQuery.error instanceof Error ? weatherQuery.error.message : null;
 
   const parsed = useMemo(
     () => parseWeatherData(weather?.weather ?? null, weather?.meta ?? null),
@@ -190,7 +258,16 @@ export function FieldCastApp() {
                   Drop a pin or ask the agent
                 </div>
               </div>
-              <Dialog open={agentOpen} onOpenChange={setAgentOpen}>
+              <Dialog
+                open={agentOpen}
+                onOpenChange={(open) => {
+                  setAgentOpen(open);
+                  if (open) {
+                    setTurns([]);
+                    setActiveTurnId(null);
+                  }
+                }}
+              >
                 <DialogTrigger asChild>
                   <Button
                     size="sm"
@@ -227,14 +304,9 @@ export function FieldCastApp() {
                       <AgentPanel
                         question={question}
                         onQuestionChange={setQuestion}
-                        events={events}
-                        answer={streamedAnswer}
+                        turns={turns}
+                        activeTurnId={activeTurnId}
                         running={streamMutation.isPending}
-                        error={
-                          streamMutation.error instanceof Error
-                            ? streamMutation.error.message
-                            : null
-                        }
                         onAsk={(message) => streamMutation.mutate(message)}
                         pin={pin}
                         inDialog

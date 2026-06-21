@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowUp,
@@ -16,7 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import type { ChatEvent } from "@/lib/weather";
+import type { ChatEvent, ChatTurn } from "@/lib/weather";
 
 type ToolEvent = {
   id: string;
@@ -26,11 +26,52 @@ type ToolEvent = {
   status: "running" | "completed";
 };
 
+function buildToolEvents(events: ChatEvent[]): ToolEvent[] {
+  const items: ToolEvent[] = [];
+  const indexByCallId = new Map<string, number>();
+
+  events.forEach((event, index) => {
+    if (event.type === "tool_start") {
+      const id = event.tool_call_id || `${event.tool}-${index}`;
+      indexByCallId.set(id, items.length);
+      const input = event.input ?? {};
+      items.push({
+        id,
+        tool: event.tool,
+        input: Object.keys(input).length > 0 ? input : undefined,
+        status: "running",
+      });
+    }
+
+    if (event.type === "tool_end") {
+      const id = event.tool_call_id || `${event.tool}-${index}`;
+      const existingIndex = indexByCallId.get(id);
+      if (existingIndex === undefined) {
+        items.push({
+          id,
+          tool: event.tool,
+          summary: event.summary,
+          status: "completed",
+        });
+        return;
+      }
+      items[existingIndex] = {
+        ...items[existingIndex],
+        tool: event.tool,
+        summary: event.summary,
+        status: "completed",
+      };
+    }
+  });
+
+  return items;
+}
+
 const SUGGESTIONS = [
   "Should I spray crops here tomorrow afternoon?",
+  "Any flood or wind risk tonight?",
   "Is it safe to harvest today?",
   "When's the next dry window this week?",
-  "Any flood or wind risk tonight?",
 ];
 
 const TOOL_LABELS: Record<string, string> = {
@@ -45,39 +86,32 @@ function getToolLabel(tool: string, running: boolean) {
 export function AgentPanel({
   question,
   onQuestionChange,
-  events,
-  answer,
+  turns,
+  activeTurnId,
   running,
-  error,
   onAsk,
   pin,
   inDialog,
 }: {
   question: string;
   onQuestionChange: (value: string) => void;
-  events: ChatEvent[];
-  answer: string;
+  turns: ChatTurn[];
+  activeTurnId: string | null;
   running: boolean;
-  error: string | null;
   onAsk: (message: string) => void;
   pin: { lat: number; lon: number };
   inDialog?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [sentQuestion, setSentQuestion] = useState<string | null>(null);
 
-  const toolEvents = useMemo(() => buildToolEvents(events), [events]);
-  const contextEvent = events.find((event) => event.type === "context");
-  const errorEvent = events.find((event) => event.type === "error");
-  const hasActivity =
-    events.length > 0 || answer.length > 0 || running || sentQuestion !== null;
+  const hasActivity = turns.length > 0 || running;
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [events, answer, running]);
+  }, [turns, running]);
 
   useEffect(() => {
     if (!textareaRef.current) return;
@@ -87,14 +121,12 @@ export function AgentPanel({
 
   function handleSubmit() {
     if (!question.trim() || running) return;
-    setSentQuestion(question);
     onAsk(question);
     onQuestionChange("");
   }
 
   function handleSuggestion(suggestion: string) {
     onQuestionChange(suggestion);
-    setSentQuestion(suggestion);
     onAsk(suggestion);
     onQuestionChange("");
   }
@@ -144,40 +176,57 @@ export function AgentPanel({
         {!hasActivity ? (
           <EmptyState pin={pin} />
         ) : (
-          <div className="space-y-3">
-            {contextEvent?.type === "context" ? (
-              <ContextChip
-                lat={contextEvent.lat}
-                lon={contextEvent.lon}
-                days={contextEvent.days}
-              />
-            ) : null}
+          <div className="space-y-5">
+            {turns.map((turn) => {
+              const toolEvents = buildToolEvents(turn.events);
+              const contextEvent = turn.events.find(
+                (event) => event.type === "context",
+              );
+              const errorEvent = turn.events.find(
+                (event) => event.type === "error",
+              );
+              const isActive = turn.id === activeTurnId;
+              const isRunning = isActive && running;
+              const allToolsCompleted =
+                toolEvents.length > 0 &&
+                toolEvents.every(
+                  (toolEvent) => toolEvent.status === "completed",
+                );
 
-            {sentQuestion ? <UserBubble text={sentQuestion} /> : null}
+              return (
+                <div key={turn.id} className="space-y-3">
+                  <UserBubble text={turn.question} />
 
-            {toolEvents.map((toolEvent) => (
-              <ToolCallRow key={toolEvent.id} toolEvent={toolEvent} />
-            ))}
+                  {contextEvent?.type === "context" ? (
+                    <ContextChip
+                      lat={contextEvent.lat}
+                      lon={contextEvent.lon}
+                      days={contextEvent.days}
+                    />
+                  ) : null}
 
-            {answer ? (
-              <AnswerBubble text={answer} running={running} />
-            ) : running && !toolEvents.length ? (
-              <WaitingForModel />
-            ) : null}
+                  {toolEvents.map((toolEvent) => (
+                    <ToolCallRow key={toolEvent.id} toolEvent={toolEvent} />
+                  ))}
 
-            {running &&
-            toolEvents.length > 0 &&
-            toolEvents.every(
-              (toolEvent) => toolEvent.status === "completed",
-            ) ? (
-              <WaitingForModel />
-            ) : null}
+                  {turn.answer ? (
+                    <AnswerBubble text={turn.answer} running={isRunning} />
+                  ) : isRunning && !toolEvents.length ? (
+                    <WaitingForModel />
+                  ) : null}
 
-            {error ? (
-              <ErrorRow message={error} />
-            ) : errorEvent?.type === "error" ? (
-              <ErrorRow message={errorEvent.message} />
-            ) : null}
+                  {isRunning && allToolsCompleted && !turn.answer ? (
+                    <WaitingForModel />
+                  ) : null}
+
+                  {turn.error ? (
+                    <ErrorRow message={turn.error} />
+                  ) : errorEvent?.type === "error" ? (
+                    <ErrorRow message={errorEvent.message} />
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -398,44 +447,3 @@ function ErrorRow({ message }: { message: string }) {
 }
 
 /* ------------------------------------------------------------------ */
-
-function buildToolEvents(events: ChatEvent[]): ToolEvent[] {
-  const items: ToolEvent[] = [];
-  const indexByCallId = new Map<string, number>();
-
-  events.forEach((event, index) => {
-    if (event.type === "tool_start") {
-      const id = event.tool_call_id || `${event.tool}-${index}`;
-      indexByCallId.set(id, items.length);
-      const input = event.input ?? {};
-      items.push({
-        id,
-        tool: event.tool,
-        input: Object.keys(input).length > 0 ? input : undefined,
-        status: "running",
-      });
-    }
-
-    if (event.type === "tool_end") {
-      const id = event.tool_call_id || `${event.tool}-${index}`;
-      const existingIndex = indexByCallId.get(id);
-      if (existingIndex === undefined) {
-        items.push({
-          id,
-          tool: event.tool,
-          summary: event.summary,
-          status: "completed",
-        });
-        return;
-      }
-      items[existingIndex] = {
-        ...items[existingIndex],
-        tool: event.tool,
-        summary: event.summary,
-        status: "completed",
-      };
-    }
-  });
-
-  return items;
-}
