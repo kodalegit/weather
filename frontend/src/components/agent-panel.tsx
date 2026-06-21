@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import {
   AlertTriangle,
   ArrowUp,
@@ -409,14 +410,53 @@ function AnswerBubble({ text, running }: { text: string; running: boolean }) {
         <Sparkles className="h-3.5 w-3.5" />
       </div>
       <div className="min-w-0 flex-1 rounded-2xl rounded-tl-md border border-stone-200/70 bg-white px-3.5 py-2.5">
-        <p
+        <div
           className={cn(
-            "whitespace-pre-wrap text-sm leading-relaxed text-stone-700",
+            "prose prose-sm max-w-none text-[13px] text-stone-700",
             running && "stream-caret",
           )}
         >
-          {text}
-        </p>
+          <ReactMarkdown
+            components={{
+              p: ({ children }) => (
+                <p className="leading-snug [&:not(:last-child)]:mb-2">
+                  {children}
+                </p>
+              ),
+              ul: ({ children }) => (
+                <ul className="my-1.5 list-disc pl-4">{children}</ul>
+              ),
+              ol: ({ children }) => (
+                <ol className="my-1.5 list-decimal pl-4">{children}</ol>
+              ),
+              li: ({ children }) => (
+                <li className="mb-0.5 leading-snug">{children}</li>
+              ),
+              strong: ({ children }) => (
+                <strong className="font-semibold text-stone-900">
+                  {children}
+                </strong>
+              ),
+              a: ({ children, href }) => (
+                <a
+                  href={href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-amber-600 underline hover:text-amber-700"
+                >
+                  {children}
+                </a>
+              ),
+              code: ({ children }) => (
+                <code className="rounded bg-stone-100 px-1 py-0.5 font-mono text-[11px] text-stone-600">
+                  {children}
+                </code>
+              ),
+            }}
+          >
+            {text}
+          </ReactMarkdown>
+        </div>
       </div>
     </div>
   );
