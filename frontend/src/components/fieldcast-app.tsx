@@ -70,9 +70,7 @@ async function fetchUsage(): Promise<Record<string, unknown> | null> {
 export function FieldCastApp() {
   const [pin, setPin] = useState<Pin>(starterPin);
   const [includeAi] = useState(true);
-  const [question, setQuestion] = useState(
-    "Should I spray crops here tomorrow afternoon?",
-  );
+  const [question, setQuestion] = useState("");
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
   const [agentOpen, setAgentOpen] = useState(false);
@@ -228,14 +226,10 @@ export function FieldCastApp() {
   const advisory: Advisory | null = weather?.advisory ?? null;
 
   const quotaLabel = useMemo(() => {
-    const remaining = readNumber(usage, [
-      "remaining",
-      "requestsremaining",
-      "requestremaining",
-    ]);
-    const limit = readNumber(usage, ["limit", "requestlimit", "requests"]);
-    if (remaining === null && limit === null) return "Free plan";
-    return `${formatMaybe(remaining)} / ${formatMaybe(limit)} calls`;
+    const used = readNumber(usage, ["period", "requestcount"]);
+    const limit = readNumber(usage, ["limits", "requests"]);
+    if (used === null && limit === null) return "Free plan";
+    return `${formatMaybe(used)} / ${formatMaybe(limit)} calls`;
   }, [usage]);
 
   return (
@@ -270,12 +264,12 @@ export function FieldCastApp() {
               >
                 <DialogTrigger asChild>
                   <Button
-                    size="sm"
-                    className="group shrink-0 gap-1.5 border-amber-400/50 bg-white text-stone-800 shadow-lg transition hover:border-amber-400 hover:bg-amber-50 hover:text-amber-700"
+                    size="default"
+                    className="group shrink-0 gap-2 border-0 bg-gradient-to-r from-amber-500 to-orange-500 px-4 text-white shadow-lg shadow-amber-500/30 transition-all hover:scale-105 hover:shadow-amber-500/50 active:scale-95"
                     title="Open weather agent"
                   >
-                    <Sparkles className="h-4 w-4 text-amber-500 transition group-hover:text-amber-600" />
-                    Agent
+                    <Sparkles className="h-4 w-4 animate-pulse text-white transition group-hover:rotate-12" />
+                    Ask Agent
                   </Button>
                 </DialogTrigger>
                 <DialogContent className="h-[calc(100vh-2rem)] max-h-[720px] overflow-hidden p-0 sm:h-[80vh] sm:max-h-[720px]">
@@ -358,7 +352,7 @@ export function FieldCastApp() {
           {/* Map helper hint */}
           <div className="pointer-events-none absolute bottom-4 right-4 z-[500]">
             <div className="rounded-lg border border-stone-200/80 bg-white/90 px-2.5 py-1.5 text-[11px] text-stone-500 shadow-lg backdrop-blur">
-              Click to drop a pin · double-click to zoom
+              Click to drop a pin · double-click to pan
             </div>
           </div>
         </section>
